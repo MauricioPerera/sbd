@@ -174,6 +174,45 @@ class TestAuditRegressions(unittest.TestCase):
             finally:
                 srv.cerrar()
 
+    def test_cuota_se_revalida_al_confirmar_esquemas_en_dos_bases(self):
+        with tempfile.TemporaryDirectory() as carpeta:
+            srv = sbd.servidor(carpeta)
+            try:
+                srv.cambiar_ajustes(registro=True, max_mb=1)
+                inicial = Sesion(srv, usuario=srv.registrar('ana', 'clave1234'))
+                inicial.ejecutar('crear base a  crear base b')
+                usuario = srv.usuario('ana')
+                primera = Sesion(srv, base='a', usuario=usuario)
+                segunda = Sesion(srv, base='b', usuario=usuario)
+                primera.ejecutar('empezar')
+                segunda.ejecutar('empezar')
+                ddl = 'crear tabla t { valor texto = "' + 'x' * 600_000 + '" }'
+                primera.ejecutar(ddl)
+                segunda.ejecutar(ddl)
+                primera.ejecutar('confirmar')
+                with self.assertRaisesRegex(SBDError, 'espacio'):
+                    segunda.ejecutar('confirmar')
+                self.assertNotIn('t', segunda.db.tables)
+                self.assertFalse(segunda.db.in_transaction)
+                self.assertLessEqual(srv.uso('ana')['bytes'], 1024 * 1024)
+            finally:
+                srv.cerrar()
+
+    def test_borrar_tabla_en_transaccion_sigue_posible_sobre_cuota(self):
+        with tempfile.TemporaryDirectory() as carpeta:
+            srv = sbd.servidor(carpeta)
+            try:
+                srv.cambiar_ajustes(registro=True, max_filas=5)
+                sesion = Sesion(srv, usuario=srv.registrar('ana', 'clave1234'))
+                sesion.ejecutar('crear base prueba  crear tabla a { id entero clave }  '
+                               'crear tabla b { id entero clave }  insertar en a {} {} {}  insertar en b {}')
+                srv.cambiar_ajustes(max_filas=1)
+                sesion.ejecutar('empezar  borrar tabla b  confirmar')
+                self.assertNotIn('b', sesion.db.tables)
+                self.assertEqual(sesion.ejecutar('buscar a').rowcount, 3)
+            finally:
+                srv.cerrar()
+
     def test_importacion_web_en_transaccion_y_rollback(self):
         with tempfile.TemporaryDirectory() as carpeta:
             srv = sbd.servidor(carpeta)

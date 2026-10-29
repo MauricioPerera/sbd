@@ -92,6 +92,7 @@ class Database:
         self.in_transaction = False
         self.loading = False
         self._undo = None      # [(función que deshace, cambio para el diario o None)]
+        self._quota_marks = []  # posiciones de cambios que requieren revalidar la cuota al confirmar
         self.owner = None      # sesión dueña de la transacción abierta
         self.owner_label = None
         self.last_activity = 0.0
@@ -227,6 +228,7 @@ class Database:
             self.in_transaction = True
             self.owner, self.owner_label = session, label
             self._undo = []
+            self._quota_marks = []
             return Result(message='Transacción abierta: los cambios no se guardan hasta «confirmar»')
         if isinstance(stmt, Commit):
             if not self.in_transaction:
@@ -242,6 +244,7 @@ class Database:
                 self.owner = self.owner_label = None
                 raise
             self._undo = None
+            self._quota_marks = []
             self.in_transaction = False
             self.owner = self.owner_label = None
             return Result(message='Cambios confirmados y guardados')
@@ -262,6 +265,8 @@ class Database:
             result = Executor(self, params, self.time_limit).execute(stmt)
             if self.validate_write and len(self._undo) > mark:
                 self.validate_write(self)
+                if not autocommit:
+                    self._quota_marks.append(len(self._undo))
             if autocommit:
                 self._persist(self._undo)
         except BaseException:
@@ -281,6 +286,7 @@ class Database:
     def _undo_to(self, mark):
         while len(self._undo) > mark:
             self._undo.pop()[0]()
+        self._quota_marks = [pos for pos in self._quota_marks if pos <= mark]
 
     def _schema_checkpoint(self):
         tables, views, owners = dict(self.tables), dict(self.views), dict(self.index_owner)

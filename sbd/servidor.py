@@ -676,7 +676,7 @@ class Sesion:
         db = self.servidor.abrir(self.base) if self._es_cuenta() and self.base else None
         limitar = not isinstance(orden, (Delete, DropTable, DropIndex, DropView))
         if isinstance(orden, Commit) and db:
-            limitar = any(r is not None and r[0] in ('i', 'u') for _, r in (db._undo or ()))
+            limitar = bool(db._quota_marks)
         with self.limitar(db, habilitado=limitar):
             resultado = self._ejecutar_orden(orden, params)
         if texto is not None and not isinstance(orden, SIN_AUDITAR):

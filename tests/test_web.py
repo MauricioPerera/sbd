@@ -97,6 +97,7 @@ class TestPanel(unittest.TestCase):
             s.ejecutar(volcado)
             self.assertEqual(s.base, 'biblioteca')
             self.assertEqual(s.ejecutar('buscar libro ordenar id mostrar titulo').fetchall(), [('Ficciones',), ('Rayuela',)])
+            s.servidor.cerrar()
         with urllib.request.urlopen(self.base + '/api/volcar?base=biblioteca&tabla=autor&formato=csv') as resp:
             self.assertIn('Cortázar', resp.read().decode('utf-8-sig'))
 

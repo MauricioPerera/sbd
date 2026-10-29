@@ -343,6 +343,8 @@ class TestCuentas(unittest.TestCase):
         self.servidor.cambiar_ajustes(registro=True)
         ana = self.registrar('ana')
         self.orden(ana, 'crear base mia  crear tabla t { id entero clave }  insertar en t {} {}')
+        # Garantizar inactividad incluso si el reloj monotónico tiene poca resolución.
+        self.servidor._uso = {nombre: instante - 1 for nombre, instante in self.servidor._uso.items()}
         self.servidor.soltar_inactivas(0)
         self.assertEqual(self.servidor._abiertas, {})
         self.peticion('/api/bases', galleta=ana)   # listar las suyas no abre las de los demás

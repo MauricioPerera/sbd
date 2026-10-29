@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SBD</title>
+  <meta name="description" content="SBD: el archivador de tus bases de datos. Tablas, datos y código en tu propio lenguaje.">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,500;0,6..72,600;1,6..72,400;1,6..72,500&family=Spline+Sans+Mono:wght@400;500;600&display=swap">
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <a class="salto" href="#vista">Ir al contenido</a>
+  <div class="mesa">
+    <aside class="indice" id="indice" aria-label="Índice: bases de datos y tablas">
+      <header class="marca">
+        <a class="marca-sbd" href="#/" aria-label="SBD, todas las bases">SBD</a>
+        <span class="marca-sub">archivador de datos</span>
+        <button class="solo-movil enlace" id="cerrar-indice" type="button">cerrar</button>
+      </header>
+
+      <label class="filtro-indice">
+        <span class="visualmente-oculto">Filtrar tablas</span>
+        <input type="search" id="filtro-indice" placeholder="filtrar tablas…" spellcheck="false" autocomplete="off">
+      </label>
+
+      <nav class="arbol" aria-label="Bases y tablas">
+        <ul id="arbol"></ul>
+      </nav>
+
+      <div class="atajos" id="atajos">
+        <a class="enlace" id="nueva-base" href="#/?p=bases" hidden>+ nueva base</a>
+      </div>
+
+      <footer class="pie-indice">
+        <p class="quien" id="quien"></p>
+        <span class="directorio" id="directorio"></span>
+        <button class="enlace" id="tema" type="button">pizarra</button>
+      </footer>
+    </aside>
+
+    <main class="carpeta" id="carpeta">
+      <header class="cabecera">
+        <button class="solo-movil enlace" id="abrir-indice" type="button" aria-controls="indice">índice</button>
+        <nav class="migas" id="migas" aria-label="Dónde estás"></nav>
+        <div class="cabecera-fila">
+          <div class="cabecera-titulo">
+            <h1 class="titulo" id="titulo">SBD</h1>
+            <p class="meta" id="meta"></p>
+          </div>
+          <div class="sello" id="sello" role="status" hidden>
+            <span>transacción abierta</span>
+            <button type="button" data-orden="confirmar">confirmar</button>
+            <button type="button" data-orden="deshacer">deshacer</button>
+          </div>
+        </div>
+      </header>
+
+      <nav class="pestanas" id="pestanas" aria-label="Pestañas"></nav>
+
+      <section class="vista" id="vista" tabindex="-1" aria-live="polite"></section>
+    </main>
+  </div>
+  <div class="velo" id="velo" hidden></div>
+  <ul class="sugerencias" id="sugerencias" role="listbox" aria-label="Sugerencias" hidden></ul>
+  <dialog class="ficha" id="ficha"></dialog>
+  <input type="file" id="fichero-importar" accept=".csv,.txt,.tsv,.xlsx,.xlsm" hidden>
+  <script src="/app.js"></script>
+</body>
+</html>

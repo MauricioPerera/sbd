@@ -1,0 +1,89 @@
+-- Base de ejemplo: una pequeña tienda online.
+-- Uso:  python -m sbd -f ejemplos/tienda.sbd
+
+crear base tienda si no existe
+usar tienda
+
+crear tabla categorias {
+  id      entero clave
+  nombre  texto(40) obligatorio unico
+}
+
+crear tabla productos {
+  id            entero clave
+  nombre        texto(80) obligatorio
+  categoria_id  entero -> categorias(id)
+  precio        decimal obligatorio comprobar precio >= 0
+  stock         entero = 0 comprobar stock >= 0
+  activo        logico = verdadero
+}
+
+crear tabla clientes {
+  id      entero clave
+  nombre  texto(60) obligatorio
+  email   texto(120) unico
+  ciudad  texto
+  alta    fecha = hoy()
+}
+
+crear tabla pedidos {
+  id          entero clave
+  cliente_id  entero obligatorio -> clientes(id) al borrar cascada
+  fecha       fechahora = ahora()
+  estado      texto = "pendiente"
+  comprobar estado en ["pendiente", "enviado", "entregado", "cancelado"]
+}
+
+crear tabla lineas {
+  pedido_id    entero -> pedidos(id) al borrar cascada
+  producto_id  entero -> productos(id)
+  cantidad     entero obligatorio comprobar cantidad > 0
+  precio       decimal obligatorio
+  clave (pedido_id, producto_id)
+}
+
+indexar pedidos (cliente_id)
+
+insertar en categorias (nombre) ("Libros") ("Electrónica") ("Hogar") ("Deporte")
+
+insertar en productos (nombre, categoria_id, precio, stock)
+  ("Cien años de soledad", 1, 18.90, 25)
+  ("El Quijote, edición ilustrada", 1, 32.50, 8)
+  ("Auriculares inalámbricos", 2, 59.99, 40)
+  ("Teclado mecánico", 2, 89.00, 12)
+  ("Monitor 27 pulgadas", 2, 249.00, 5)
+  ("Cafetera italiana", 3, 24.95, 30)
+  ("Juego de sartenes", 3, 64.00, 0)
+  ("Esterilla de yoga", 4, 21.50, 18)
+  ("Mancuernas 2 × 5 kg", 4, 39.90, 7)
+
+insertar en clientes (nombre, email, ciudad, alta)
+  ("Lucía Fernández", "lucia@example.com", "Madrid", 2024-01-15)
+  ("Javier Ruiz", "javier@example.com", "Sevilla", 2024-02-03)
+  ("Marta Gómez", "marta@example.com", "Valencia", 2024-02-20)
+  ("Pablo Martín", nulo, "Madrid", 2024-03-11)
+  ("Sara López", "sara@example.com", "Bilbao", 2024-04-02)
+
+insertar en pedidos (cliente_id, fecha, estado)
+  (1, 2024-03-01 10:15, "entregado")
+  (1, 2024-04-12 18:40, "enviado")
+  (2, 2024-04-15 09:05, "entregado")
+  (3, 2024-05-02 21:30, "pendiente")
+  (5, 2024-05-03 12:00, "cancelado")
+
+insertar en lineas
+  (1, 1, 1, 18.90) (1, 6, 2, 24.95)
+  (2, 3, 1, 59.99)
+  (3, 4, 1, 89.00) (3, 5, 1, 249.00)
+  (4, 8, 2, 21.50) (4, 9, 1, 39.90)
+  (5, 2, 1, 32.50)
+
+crear vista ventas_por_cliente = buscar clientes como c {
+  unir pedidos como p en p.cliente_id = c.id y p.estado != "cancelado"
+  unir lineas como l en l.pedido_id = p.id
+  agrupar c.nombre
+  mostrar c.nombre como cliente, contar(distintos p.id) como pedidos,
+          redondear(sumar(l.cantidad * l.precio), 2) como total
+}
+
+buscar ventas_por_cliente ordenar total desc

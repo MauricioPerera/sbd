@@ -1460,7 +1460,9 @@ async function seccionRegistro() {
     h('p', { class: 'mensaje' }, ajustes.registro
       ? `Abierto: cualquiera puede crearse una cuenta en ${location.host}. Hay ${plural(ajustes.cuentas, 'cuenta', 'cuentas')}.`
       : `Cerrado: solo entra quien tenga un usuario creado aquí. Hay ${plural(ajustes.cuentas, 'cuenta', 'cuentas')}.`,
-    ` El servidor usa ahora ${cifra(ajustes.memoria_mb)} MB de memoria.`),
+    ajustes.memoria_mb == null
+      ? ' No se puede medir la memoria del servidor; las cuentas no pueden añadir datos.'
+      : ` El servidor usa ahora ${cifra(ajustes.memoria_mb)} MB de memoria.`),
     h('form', { class: 'subformulario', onsubmit: async ev => {
       ev.preventDefault();
       const entero = i => Number.parseInt(i.value.replace(/\D/g, ''), 10);

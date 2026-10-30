@@ -50,6 +50,8 @@ crear clave api para web_tienda llamada "web de producción"
 
 **¿Que se registre cualquiera?** En el panel, en **Usuarios → Registro público**, marca «cualquiera puede crearse una cuenta» y ajusta los límites por cuenta. Cada cuenta solo ve sus bases (lo explica el README, en «Cuentas propias»). Como cada fila ocupa unos 1,8 KB de memoria, ajusta la «memoria máxima del servidor» a lo que le quieras dejar a SBD en esa máquina.
 
+El límite de memoria mide la memoria residente del proceso: `VmRSS` en Linux y el *working set* en Windows. Se comprueba antes de una operación que puede crecer y antes de confirmarla. Si no se puede medir, las cuentas registradas pueden consultar y borrar, pero no añadir datos; la administración sigue disponible. Esta comprobación no es un límite estricto de memoria: una operación puede consumir memoria temporalmente antes de ser rechazada. En otros sistemas sin `/proc/self/status`, la medición no está disponible.
+
 ## 3. El servicio
 
 ```bash

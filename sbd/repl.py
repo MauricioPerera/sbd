@@ -50,20 +50,48 @@ Consola: «leer fichero.sbd» ejecuta un script · «tiempo» activa o desactiva
 """
 
 
-def format_table(result):
+def _adaptar_salida(texto, salida):
+    """Escapa caracteres que la salida no puede representar, sin perder su valor."""
+    encoding = getattr(salida, 'encoding', None)
+    if not encoding:
+        return str(texto)
+    return str(texto).encode(encoding, errors='backslashreplace').decode(encoding)
+
+
+def _admite_tabla_unicode(salida):
+    encoding = getattr(salida, 'encoding', None)
+    if not encoding:
+        return True
+    try:
+        '─│┼'.encode(encoding)
+        return True
+    except UnicodeEncodeError:
+        return False
+
+
+class _ArgumentParserSeguro(argparse.ArgumentParser):
+    def _print_message(self, message, file=None):
+        if message:
+            salida = file or sys.stderr
+            salida.write(_adaptar_salida(message, salida))
+
+
+def format_table(result, ascii=False, salida=None):
     if result.columns is None:
         return result.message
-    headers = [str(h) for h in result.columns]
-    cells = [[format_value(v) for v in row] for row in result.rows]
+    adaptar = (lambda texto: _adaptar_salida(texto, salida)) if salida is not None else str
+    headers = [adaptar(h) for h in result.columns]
+    cells = [[adaptar(format_value(v)) for v in row] for row in result.rows]
     numeric = [[isinstance(v, NUMEROS) and not isinstance(v, bool) for v in row] for row in result.rows]
     widths = [len(h) for h in headers]
     for row in cells:
         for i, text in enumerate(row):
             widths[i] = max(widths[i], len(text))
-    rule = '─┼─'.join('─' * w for w in widths)
-    out = [' │ '.join(h.ljust(w) for h, w in zip(headers, widths)), rule]
+    line, sep, cross = ('-', ' | ', '-+-') if ascii else ('─', ' │ ', '─┼─')
+    rule = cross.join(line * w for w in widths)
+    out = [sep.join(h.ljust(w) for h, w in zip(headers, widths)), rule]
     for row, nums in zip(cells, numeric):
-        out.append(' │ '.join(t.rjust(w) if n else t.ljust(w) for t, w, n in zip(row, widths, nums)))
+        out.append(sep.join(t.rjust(w) if n else t.ljust(w) for t, w, n in zip(row, widths, nums)))
     n = len(cells)
     out.append(f"({n} fila{'s' if n != 1 else ''})")
     return '\n'.join(out)
@@ -125,7 +153,7 @@ class Consola:
         return self._opciones[n] if n < len(self._opciones) else None
 
     def escribir(self, texto=''):
-        print(texto, file=self.salida)
+        print(_adaptar_salida(texto, self.salida), file=self.salida)
 
     def prompt(self):
         base = self.sesion.base
@@ -138,7 +166,7 @@ class Consola:
         inicio = time.perf_counter()
         try:
             for resultado in self.sesion.iterar(texto):
-                self.escribir(format_table(resultado))
+                self.escribir(format_table(resultado, ascii=not _admite_tabla_unicode(self.salida), salida=self.salida))
                 if self.cronometro:
                     self.escribir(f"({(time.perf_counter() - inicio) * 1000:.1f} ms)")
                 inicio = time.perf_counter()
@@ -189,7 +217,7 @@ class Consola:
         pendiente = []
         while True:
             try:
-                linea = input('   … ' if pendiente else self.prompt())
+                linea = input(_adaptar_salida('   … ' if pendiente else self.prompt(), sys.stdout))
             except EOFError:
                 self.escribir()
                 break
@@ -249,7 +277,7 @@ def abrir_sesion(args):
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog='sbd', description='SBD: bases de datos con lenguaje propio')
+    parser = _ArgumentParserSeguro(prog='sbd', description='SBD: bases de datos con lenguaje propio')
     parser.add_argument('datos', nargs='?', default='datos',
                         help='directorio donde se guardan las bases (por defecto ./datos)')
     parser.add_argument('-b', '--base', help='base que se usa al empezar')
@@ -261,14 +289,14 @@ def main(argv=None):
     try:
         sesion, donde, terminar = abrir_sesion(args)
     except SBDError as e:
-        print(f"✕ {e}", file=sys.stderr)
+        print(_adaptar_salida(f"✕ {e}", sys.stderr), file=sys.stderr)
         return 1
     consola = Consola(sesion, donde=donde)
     if args.ejecutar or args.fichero:
         ok = True
         if args.fichero:
             if not os.path.exists(args.fichero):
-                print(f"✕ no existe el fichero {args.fichero}", file=sys.stderr)
+                print(_adaptar_salida(f"✕ no existe el fichero {args.fichero}", sys.stderr), file=sys.stderr)
                 terminar()
                 return 1
             with open(args.fichero, encoding='utf-8') as f:

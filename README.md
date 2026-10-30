@@ -307,6 +307,8 @@ sbd --servidor https://datos.miweb.es --clave sbd_…        # contra un servido
 
 El prompt muestra la base en uso (`sbd:tienda›`) y una `*` mientras hay una transacción abierta. Una orden puede ocupar varias líneas: mientras esté a medias, por ejemplo con una `{` abierta, la consola espera a que la termines. **Tab** completa tablas, columnas, bases y palabras del lenguaje. Órdenes propias de la consola: `ayuda`, `leer script.sbd`, `tiempo` y `salir`.
 
+Si la salida no admite los caracteres de dibujo de la tabla, la consola usa separadores ASCII. Los caracteres de datos que la codificación de salida no puede representar se muestran como escapes `\u...`; usa UTF-8 para verlos directamente.
+
 Si el servidor ya está en marcha con esa carpeta, la consola no la abre por su cuenta: se conecta a él (con la clave local que el servidor deja en `datos/.sbd.servidor`, legible solo por su dueño). Así nunca se pisan los cambios, y puedes usar la consola en un servidor de producción sin pararlo.
 
 ## Panel web

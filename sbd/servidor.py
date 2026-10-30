@@ -15,6 +15,7 @@ import os
 import re
 import secrets
 import shutil
+import sys
 import time
 import tempfile
 from contextlib import contextmanager
@@ -49,6 +50,33 @@ CRECE = (Insert, Update, CreateTable, CreateIndex, AlterTable, Import)  # lo que
 AJUSTES = {'registro': False, 'max_bases': 10, 'max_mb': 100, 'max_filas': 250_000, 'max_memoria_mb': 6000}
 RESERVADOS = {'admin', 'administrador', 'root', 'sbd', 'sistema', 'soporte', 'todo', 'todas', 'nadie'}
 _EN_PAPELERA = re.compile(r'([a-zñ_][a-z0-9ñ_]*)-(\d{8}-\d{6})' + re.escape(EXTENSION) + r'\Z')
+
+
+def _memoria_windows_mb():
+    """Memoria residente del proceso actual, en MiB; None si no se puede leer."""
+    import ctypes
+    from ctypes import wintypes
+
+    class ProcessMemoryCounters(ctypes.Structure):
+        _fields_ = [('cb', wintypes.DWORD), ('PageFaultCount', wintypes.DWORD)] + [
+            (name, ctypes.c_size_t) for name in (
+                'PeakWorkingSetSize', 'WorkingSetSize', 'QuotaPeakPagedPoolUsage', 'QuotaPagedPoolUsage',
+                'QuotaPeakNonPagedPoolUsage', 'QuotaNonPagedPoolUsage', 'PagefileUsage', 'PeakPagefileUsage')]
+
+    try:
+        kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+        psapi = ctypes.WinDLL('psapi', use_last_error=True)
+        kernel.GetCurrentProcess.argtypes = []
+        kernel.GetCurrentProcess.restype = wintypes.HANDLE
+        psapi.GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(ProcessMemoryCounters), wintypes.DWORD]
+        psapi.GetProcessMemoryInfo.restype = wintypes.BOOL
+        counters = ProcessMemoryCounters()
+        counters.cb = ctypes.sizeof(counters)
+        if not psapi.GetProcessMemoryInfo(kernel.GetCurrentProcess(), ctypes.byref(counters), counters.cb):
+            return None
+        return counters.WorkingSetSize // (1024 * 1024)
+    except (OSError, AttributeError):
+        return None
 
 
 class Servidor:
@@ -228,14 +256,23 @@ class Servidor:
 
     @staticmethod
     def memoria_mb():
+        if sys.platform == 'win32':
+            return _memoria_windows_mb()
         try:
             with open('/proc/self/status') as f:
                 for linea in f:
                     if linea.startswith('VmRSS:'):
                         return int(linea.split()[1]) // 1024
-        except OSError:
+        except (OSError, ValueError, IndexError):
             pass
-        return 0
+        return None
+
+    def _comprobar_memoria(self, maximo):
+        memoria = self.memoria_mb()
+        if memoria is None:
+            raise PermisoDenegado('no se puede medir la memoria del servidor; vuelve a intentarlo más tarde')
+        if memoria >= maximo:
+            raise PermisoDenegado("el servidor está lleno ahora mismo: vuelve a intentarlo en un rato")
 
     def comprobar_cuota(self, usuario, nueva_base=False):
         """Para las cuentas: lanza un error claro si la orden las haría pasar de sus límites."""
@@ -248,8 +285,7 @@ class Servidor:
         if u['filas'] >= u['max_filas']:
             raise PermisoDenegado(f"tu cuenta tiene {u['filas']:,} filas, el máximo es {u['max_filas']:,}: "
                                   "borra filas o tablas para seguir añadiendo".replace(',', '.'))
-        if self.memoria_mb() >= u['max_memoria_mb']:
-            raise PermisoDenegado("el servidor está lleno ahora mismo: vuelve a intentarlo en un rato")
+        self._comprobar_memoria(u['max_memoria_mb'])
 
     def comprobar_cuota_resultado(self, usuario, db, adicional=False):
         """Comprueba el resultado antes de confirmarlo, incluyendo el diario pendiente."""
@@ -266,6 +302,7 @@ class Servidor:
         total_bytes = u['bytes'] + proyectado - (0 if adicional else db.bytes_on_disk)
         if total_bytes > u['max_mb'] * 1024 * 1024:
             raise PermisoDenegado('la operación superaría el máximo de espacio de tu cuenta')
+        self._comprobar_memoria(u['max_memoria_mb'])
 
     def soltar_inactivas(self, segundos):
         """Guarda y saca de la memoria las bases que nadie ha usado en un rato."""

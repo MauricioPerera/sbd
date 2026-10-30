@@ -67,6 +67,93 @@ COOKIE = 'sbd_sesion'
 FICHERO_SERVIDOR = '.sbd.servidor'  # url y clave local para que la consola se conecte
 _CLAVE = re.compile(r'''(\bclave\b(?:\s+de\s+\S+\s+a)?\s+)("(?:[^"]|"")*"|'(?:[^']|'')*')''', re.IGNORECASE)
 
+_SUSTITUTO_UNICODE = re.compile(r'[\ud800-\udfff]')
+_SIMBOLOS_JSON = re.compile(rb'["{}\[\],]')
+_SIMBOLOS_CADENA_JSON = re.compile(rb'["\\]')
+_LOTE_ESCAPES_JSON = re.compile(rb'(?:\\u[0-9a-fA-F]{4}|\\.){1,4096}', re.DOTALL)
+MAX_PROFUNDIDAD_JSON = 64
+MAX_UNIDADES_JSON = 100000   # contenedores y comas fuera de cadenas
+MAX_ESCAPES_JSON = 1000000  # secuencias de escape dentro de cadenas
+
+
+def _objeto_json_sin_duplicados(pares):
+    objeto = {}
+    for clave, valor in pares:
+        if clave in objeto:
+            raise ValueError('clave JSON duplicada')
+        objeto[clave] = valor
+    return objeto
+
+
+def _constante_json_invalida(_):
+    raise ValueError('constante JSON no finita')
+
+
+def _numero_json_finito(texto):
+    valor = float(texto)
+    if not math.isfinite(valor):
+        raise ValueError('número JSON no finito')
+    return valor
+
+
+def _comprobar_profundidad_json(datos):
+    """Limita profundidad, complejidad y escapes antes de construir el objeto JSON."""
+    profundidad = 0
+    unidades = 0
+    escapes = 0
+    cadena = False
+    posicion = 0
+    while coincidencia := (_SIMBOLOS_CADENA_JSON if cadena else _SIMBOLOS_JSON).search(datos, posicion):
+        posicion = coincidencia.end()
+        simbolo = coincidencia.group()
+        if cadena:
+            if simbolo == b'\\':
+                inicio = coincidencia.start()
+                lote = _LOTE_ESCAPES_JSON.match(datos, inicio)
+                if lote is None:  # Una barra final incompleta será rechazada por el decodificador.
+                    continue
+                posicion = lote.end()
+                # Cada escape empieza con una barra; una barra escapada tiene dos.
+                escapes += datos.count(b'\\', inicio, posicion) - datos.count(b'\\\\', inicio, posicion)
+                if escapes > MAX_ESCAPES_JSON:
+                    raise ValueError('demasiados escapes JSON')
+            elif simbolo == b'"':
+                cadena = False
+        elif simbolo == b'"':
+            cadena = True
+        elif simbolo in (b'[', b'{'):
+            profundidad += 1
+            unidades += 1
+            if profundidad > MAX_PROFUNDIDAD_JSON:
+                raise ValueError('JSON demasiado anidado')
+            if unidades > MAX_UNIDADES_JSON:
+                raise ValueError('JSON demasiado complejo')
+        elif simbolo == b',':
+            unidades += 1
+            if unidades > MAX_UNIDADES_JSON:
+                raise ValueError('JSON demasiado complejo')
+        elif simbolo in (b']', b'}'):
+            profundidad -= 1
+            if profundidad < 0:
+                raise ValueError('JSON con cierre inesperado')
+
+
+def _validar_json(valor, profundidad=0):
+    if isinstance(valor, str):
+        if _SUSTITUTO_UNICODE.search(valor):
+            raise ValueError('carácter Unicode incompleto')
+    elif isinstance(valor, dict):
+        if profundidad >= MAX_PROFUNDIDAD_JSON:
+            raise ValueError('JSON demasiado anidado')
+        for clave, contenido in valor.items():
+            _validar_json(clave, profundidad + 1)
+            _validar_json(contenido, profundidad + 1)
+    elif isinstance(valor, list):
+        if profundidad >= MAX_PROFUNDIDAD_JSON:
+            raise ValueError('JSON demasiado anidado')
+        for contenido in valor:
+            _validar_json(contenido, profundidad + 1)
+
 
 class ApiError(Exception):
     def __init__(self, message, status=HTTPStatus.BAD_REQUEST, tipo='peticion'):
@@ -541,7 +628,10 @@ class Handler(BaseHTTPRequestHandler):
     def leer_cuerpo(self):
         if self._cuerpo is not None:  # si se reintenta por base ocupada, el cuerpo ya se leyó
             return self._cuerpo
-        if not (self.headers.get('Content-Type') or '').startswith('application/json'):
+        if len(self.headers.get_all('Content-Type', [])) > 1:
+            raise ApiError('Content-Type duplicado')
+        tipo = (self.headers.get('Content-Type') or '').split(';', 1)[0].strip().lower()
+        if tipo != 'application/json':
             # Exigir JSON obliga al navegador a pedir permiso (CORS): otra web no puede enviar órdenes.
             raise ApiError('se esperaba Content-Type: application/json', HTTPStatus.UNSUPPORTED_MEDIA_TYPE)
         if self.headers.get('Transfer-Encoding'):
@@ -571,12 +661,16 @@ class Handler(BaseHTTPRequestHandler):
             datos = b''.join(partes)
             if len(datos) != length:
                 raise ApiError('cuerpo incompleto')
-            cuerpo = json.loads(datos or b'{}')
+            texto = (datos or b'{}').decode('utf-8-sig')
+            _comprobar_profundidad_json(datos)
+            cuerpo = json.loads(texto, object_pairs_hook=_objeto_json_sin_duplicados,
+                                parse_constant=_constante_json_invalida, parse_float=_numero_json_finito)
+            _validar_json(cuerpo)
         except TimeoutError:
             self.close_connection = True
             raise ApiError('tiempo de lectura agotado', HTTPStatus.REQUEST_TIMEOUT) from None
-        except ValueError:
-            raise ApiError('el cuerpo no es JSON válido') from None
+        except (ValueError, RecursionError):
+            raise ApiError('el cuerpo no es JSON válido o supera los límites permitidos') from None
         finally:
             self.connection.settimeout(15)
         if not isinstance(cuerpo, dict):

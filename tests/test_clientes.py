@@ -38,7 +38,8 @@ try {{ $db->ejecutar('buscar nada'); }} catch (SBDException $e) {{ $r['error'] =
 echo json_encode($r);
 """)
             try:
-                salida = subprocess.run([PHP, script, f"http://127.0.0.1:{http.server_address[1]}", clave],
+                salida = subprocess.run([PHP, '-d', 'display_errors=stderr', script,
+                                         f"http://127.0.0.1:{http.server_address[1]}", clave],
                                         capture_output=True, text=True, timeout=60)
                 self.assertEqual(json.loads(salida.stdout), {'precio': '4.50', 'stock': 4, 'error': 'orden'}, salida.stderr)
             finally:

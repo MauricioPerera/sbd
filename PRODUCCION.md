@@ -86,6 +86,10 @@ Opciones del servidor (`sbd servidor --help`):
 
 Para abrirse a la red (`--host` distinto de `127.0.0.1`) o con `--proxy`, el servidor exige que exista al menos un usuario. Si no lo hay, no arranca.
 
+Los cuerpos POST deben usar una sola cabecera `Content-Type: application/json` y JSON UTF-8. Se rechazan claves duplicadas, números no finitos, sustitutos Unicode incompletos y más de 64 objetos o listas anidados contando el objeto raíz. Antes de construir el objeto se aplica un límite de 100.000 unidades: cada apertura de objeto o lista y cada coma fuera de una cadena cuenta una unidad. Se admiten hasta 1.000.000 de secuencias de escape. Los clientes que envíen UTF-16 o superen estos límites deben adaptarse. El cuerpo completo aún se recibe y decodifica en memoria; usa también límites de tamaño, memoria y conexiones en el proxy y el sistema.
+
+`python scripts/ensayo_json_carga.py` compara el recorrido por carácter y por lotes con los mismos límites: envía ocho cuerpos de prueba de unos 2 MB a un servidor temporal, verifica que se rechacen y comprueba una orden posterior. Tres muestras locales dieron medianas de 2,110 y 0,565 s en [Windows](evidencia/json/windows.json), y 1,922 y 0,270 s en [Linux/WSL](evidencia/json/linux-wsl.json), respectivamente. Son mediciones sin proxy ni red externa y no establecen límites de producción; la referencia por carácter no es el analizador anterior a la introducción de estos límites.
+
 ## 4. HTTPS
 
 **Con un proxy (recomendado).** El proxy se encarga del certificado y lo renueva solo. SBD sigue escuchando solo en `127.0.0.1`. Hay que arrancar SBD con `--proxy datos.miweb.es` para que:

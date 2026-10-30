@@ -1,0 +1,52 @@
+{
+  "python": "3.14.4",
+  "fuente_sha256": "d93326226faa435222d6f951b9ae25f5cf6fe584360b849683bdbc5819ce5d93",
+  "guion_sha256": "afe631c130106de4db875563cfdf96e2aee53c9c3239e12384749548711f8bab",
+  "muestras": {
+    "anterior": [
+      {
+        "duracion_s": 2.205,
+        "salud_max_ms": 412.806,
+        "rechazo_max_ms": 2183.035,
+        "consultas_salud": 8
+      },
+      {
+        "duracion_s": 1.801,
+        "salud_max_ms": 331.596,
+        "rechazo_max_ms": 1785.434,
+        "consultas_salud": 9
+      },
+      {
+        "duracion_s": 1.922,
+        "salud_max_ms": 335.175,
+        "rechazo_max_ms": 1870.79,
+        "consultas_salud": 11
+      }
+    ],
+    "optimizado": [
+      {
+        "duracion_s": 0.27,
+        "salud_max_ms": 71.295,
+        "rechazo_max_ms": 216.035,
+        "consultas_salud": 3
+      },
+      {
+        "duracion_s": 0.234,
+        "salud_max_ms": 14.077,
+        "rechazo_max_ms": 182.073,
+        "consultas_salud": 4
+      },
+      {
+        "duracion_s": 1.033,
+        "salud_max_ms": 37.251,
+        "rechazo_max_ms": 1029.208,
+        "consultas_salud": 19
+      }
+    ]
+  },
+  "mediana_duracion_s": {
+    "anterior": 1.922,
+    "optimizado": 0.27
+  },
+  "nota": "ocho cuerpos de unos 2 MB; carga HTTP local sin proxy; pocas muestras"
+}

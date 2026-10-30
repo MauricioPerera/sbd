@@ -42,7 +42,8 @@ class TestPanel(unittest.TestCase):
             with urllib.request.urlopen(req) as resp:
                 return resp.status, json.load(resp)
         except urllib.error.HTTPError as e:
-            return e.code, json.load(e)
+            with e:
+                return e.code, json.load(e)
 
     def test_bases_y_estructura(self):
         datos = self.get('/api/bases')
@@ -107,7 +108,8 @@ class TestPanel(unittest.TestCase):
         req = urllib.request.Request(self.base + '/api/bases', headers={'Host': 'atacante.example'})
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             urllib.request.urlopen(req)
-        self.assertEqual(ctx.exception.code, 403)
+        with ctx.exception as respuesta:
+            self.assertEqual(respuesta.code, 403)
 
 
 class TestPanelConUsuarios(unittest.TestCase):
@@ -140,7 +142,8 @@ class TestPanelConUsuarios(unittest.TestCase):
             with urllib.request.urlopen(req) as resp:
                 return resp.status, json.load(resp), resp.headers.get('Set-Cookie')
         except urllib.error.HTTPError as e:
-            return e.code, json.load(e), None
+            with e:
+                return e.code, json.load(e), None
 
     def entrar(self, usuario, clave):
         status, datos, galleta = self.peticion('/api/entrar', {'usuario': usuario, 'clave': clave})
@@ -195,7 +198,8 @@ class TestPanelConUsuarios(unittest.TestCase):
                 with urllib.request.urlopen(req) as resp:
                     return resp.status, resp.headers.get('Set-Cookie')
             except urllib.error.HTTPError as e:
-                return e.code, None
+                with e:
+                    return e.code, None
 
         status, galleta = entrar('203.0.113.7', 'clave de la jefa')
         self.assertEqual(status, 200)
@@ -252,7 +256,8 @@ class TestCuentas(unittest.TestCase):
             with urllib.request.urlopen(req) as resp:
                 return resp.status, json.load(resp), (resp.headers.get('Set-Cookie') or '').split(';')[0]
         except urllib.error.HTTPError as e:
-            return e.code, json.load(e), None
+            with e:
+                return e.code, json.load(e), None
 
     def registrar(self, nombre, clave='una clave larga'):
         status, datos, galleta = self.peticion('/api/registrar', {'usuario': nombre, 'clave': clave})

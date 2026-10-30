@@ -1,4 +1,5 @@
 import json
+import io
 import tempfile
 import threading
 import time
@@ -6,6 +7,7 @@ import unittest
 import urllib.error
 import urllib.request
 from decimal import Decimal
+from unittest.mock import patch
 
 import sbd
 from sbd.cliente import SesionRemota
@@ -40,6 +42,19 @@ class ConServidor(unittest.TestCase):
 
 
 class TestApi(ConServidor):
+    def test_cierra_respuesta_http_error_incluso_si_no_es_json(self):
+        for cuerpo in (b'{"error":"denegado"}', b'no es json'):
+            with self.subTest(cuerpo=cuerpo):
+                respuesta = io.BytesIO(cuerpo)
+                error = urllib.error.HTTPError(self.url, 403, 'Forbidden', {}, respuesta)
+                with patch('urllib.request.urlopen', side_effect=error):
+                    if cuerpo.startswith(b'{'):
+                        self.assertEqual(self.db._peticion('GET', '/prueba'), ({'error': 'denegado'}, 403))
+                    else:
+                        with self.assertRaises(sbd.ErrorServidor):
+                            self.db._peticion('GET', '/prueba')
+                self.assertTrue(respuesta.closed)
+
     def test_consultar_con_parametros_y_dinero_exacto(self):
         filas = self.db.consultar('buscar productos donde precio < ? ordenar precio', [20])
         self.assertEqual([(f['nombre'], f['precio']) for f in filas], [('té', Decimal('4.50')), ('café', Decimal('12.99'))])
@@ -103,7 +118,8 @@ class TestApi(ConServidor):
                 with urllib.request.urlopen(req) as resp:
                     return resp.status, resp.headers.get('Access-Control-Allow-Origin')
             except urllib.error.HTTPError as e:
-                return e.code, None
+                with e:
+                    return e.code, None
         self.assertEqual(preflight('https://miapp.es'), (204, 'https://miapp.es'))
         self.assertEqual(preflight('https://otra.web'), (403, None))
 

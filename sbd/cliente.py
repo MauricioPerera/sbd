@@ -120,10 +120,11 @@ class Cliente:
             with urllib.request.urlopen(req, timeout=self.tiempo, context=self._contexto) as resp:
                 return json.load(resp), resp.status
         except urllib.error.HTTPError as e:
-            try:
-                return json.load(e), e.code
-            except ValueError:
-                raise ErrorServidor(f"el servidor respondió {e.code} sin explicación", 'http', e.code) from None
+            with e:
+                try:
+                    return json.load(e), e.code
+                except ValueError:
+                    raise ErrorServidor(f"el servidor respondió {e.code} sin explicación", 'http', e.code) from None
         except urllib.error.URLError as e:
             raise ErrorServidor(f"no se puede conectar con {self.url}: {e.reason}", 'conexion') from None
 

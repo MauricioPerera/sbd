@@ -93,6 +93,7 @@ class Database:
         self.loading = False
         self._undo = None      # [(función que deshace, cambio para el diario o None)]
         self._quota_marks = []  # posiciones de cambios que requieren revalidar la cuota al confirmar
+        self._quota_pending_bytes = None  # estimación de diario, calculada incrementalmente cuando se necesita
         self.owner = None      # sesión dueña de la transacción abierta
         self.owner_label = None
         self.last_activity = 0.0
@@ -229,6 +230,7 @@ class Database:
             self.owner, self.owner_label = session, label
             self._undo = []
             self._quota_marks = []
+            self._quota_pending_bytes = None
             return Result(message='Transacción abierta: los cambios no se guardan hasta «confirmar»')
         if isinstance(stmt, Commit):
             if not self.in_transaction:
@@ -240,11 +242,13 @@ class Database:
             except BaseException:
                 self._undo_to(0)
                 self._undo = None
+                self._quota_pending_bytes = None
                 self.in_transaction = False
                 self.owner = self.owner_label = None
                 raise
             self._undo = None
             self._quota_marks = []
+            self._quota_pending_bytes = None
             self.in_transaction = False
             self.owner = self.owner_label = None
             return Result(message='Cambios confirmados y guardados')
@@ -260,6 +264,7 @@ class Database:
         autocommit = not self.in_transaction
         if autocommit:
             self._undo = []
+            self._quota_pending_bytes = None
         mark = len(self._undo)
         try:
             result = Executor(self, params, self.time_limit).execute(stmt)
@@ -274,18 +279,28 @@ class Database:
             self._undo_to(mark)
             if autocommit:
                 self._undo = None
+                self._quota_pending_bytes = None
             raise
         if autocommit:
             self._undo = None
+            self._quota_pending_bytes = None
         return result
 
     def _log(self, undo, redo=None):
         if self._undo is not None:
             self._undo.append((undo, redo))
+            if self._quota_pending_bytes is not None and redo is not None:
+                try:
+                    self._quota_pending_bytes += self._quota_redo_size(redo)
+                except (TypeError, ValueError, UnicodeError):
+                    self._quota_pending_bytes = None
 
     def _undo_to(self, mark):
         while len(self._undo) > mark:
-            self._undo.pop()[0]()
+            undo, redo = self._undo.pop()
+            if self._quota_pending_bytes is not None and redo is not None:
+                self._quota_pending_bytes -= self._quota_redo_size(redo)
+            undo()
         self._quota_marks = [pos for pos in self._quota_marks if pos <= mark]
 
     def _schema_checkpoint(self):
@@ -668,6 +683,27 @@ class Database:
         return updated
 
     # ========================================================== persistencia
+    @staticmethod
+    def _quota_redo_size(redo):
+        return len(json.dumps(redo, ensure_ascii=False, default=json_por_defecto).encode('utf-8')) + 128
+
+    def quota_pending_size(self):
+        if self._quota_pending_bytes is None:
+            self._quota_pending_bytes = sum(self._quota_redo_size(redo) for _, redo in (self._undo or ())
+                                            if redo is not None)
+        return self._quota_pending_bytes
+
+    def quota_snapshot_size(self):
+        """Tamaño exacto de la foto JSON sin reconstruir cada vez todas sus filas."""
+        data = {
+            'format': FILE_FORMAT, 'version': FILE_VERSION, 'generacion': self.generation + 1,
+            'schema': self.schema_sbd(),
+            'data': {name: {'next_rowid': t.next_rowid, 'autoinc': t.autoinc, 'rows': []}
+                     for name, t in self.tables.items()},
+        }
+        base = len(json.dumps(data, ensure_ascii=False, default=json_por_defecto).encode('utf-8'))
+        return base + sum(t.snapshot_rows_size() for t in self.tables.values())
+
     def _persist(self, entries):
         """Guarda lo confirmado: una línea en el diario o, si cambió la estructura, la foto entera."""
         if not self.path or not entries:

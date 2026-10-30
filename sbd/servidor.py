@@ -30,7 +30,6 @@ from .nodes import (AlterTable, Begin, ChangePassword, ChangePermission, Commit,
                     Import, Insert, RecoverDatabase, Rollback, Select, RestoreBackup, ShowApiKeys, ShowBackups,
                     ShowDatabases, ShowHistory, ShowIndexes, ShowTables, ShowTrash, ShowUsers, Update, UseDatabase)
 from .result import Result
-from .values import json_por_defecto
 
 EXTENSION = '.base'
 _VALID_NAME = re.compile(r'[a-zñ_][a-z0-9ñ_]{0,62}\Z')
@@ -294,10 +293,8 @@ class Servidor:
         total_filas = u['filas'] + (filas if adicional else 0)
         if total_filas > u['max_filas']:
             raise PermisoDenegado('la operación superaría el máximo de filas de tu cuenta')
-        foto = len(json.dumps(db._snapshot_data(), ensure_ascii=False, default=json_por_defecto).encode('utf-8'))
-        pendientes = [r for _, r in (db._undo or ()) if r is not None]
-        diario = sum(len(json.dumps(r, ensure_ascii=False, default=json_por_defecto).encode('utf-8')) + 128
-                     for r in pendientes)
+        foto = db.quota_snapshot_size()
+        diario = db.quota_pending_size()
         proyectado = max(foto + db._journal_bytes, db.bytes_on_disk + diario)
         total_bytes = u['bytes'] + proyectado - (0 if adicional else db.bytes_on_disk)
         if total_bytes > u['max_mb'] * 1024 * 1024:

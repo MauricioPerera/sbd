@@ -8,13 +8,14 @@ crean una copia con clone() y la sustituyen en el catálogo, para que deshacer u
 transacción sea simplemente volver a poner la versión anterior.
 """
 import bisect
+import json
 import re
 from dataclasses import dataclass
 from typing import Any, Optional
 
 from .errors import SBDError
 from .parser import KEYWORDS
-from .values import TYPE_NAMES, es_nan, sort_key
+from .values import TYPE_NAMES, es_nan, json_por_defecto, sort_key
 
 _SIMPLE_IDENT = re.compile(r'[^\W\d]\w*\Z')
 _ON_DELETE_WORDS = {'cascade': 'cascada', 'set null': 'anular'}
@@ -154,6 +155,7 @@ class Table:
         self.next_rowid = 1
         self.autoinc = 0  # mayor valor visto en la columna autoincremental
         self.unordered = False
+        self._snapshot_rows_bytes = None  # suma de las filas JSON; se calcula solo cuando se necesitan cuotas
 
     @property
     def colnames(self):
@@ -181,28 +183,54 @@ class Table:
                 return col.name
         return None
 
-    def scan(self):
+    def scan_iter(self):
         if self.unordered:
             # Se reordena el mismo dict (no uno nuevo): las copias de clone() lo comparten.
             items = sorted(self.rows.items())
             self.rows.clear()
             self.rows.update(items)
             self.unordered = False
-        return list(self.rows.items())
+        return iter(self.rows.items())
+
+    def scan(self):
+        return list(self.scan_iter())
+
+    def _snapshot_row_size(self, rowid, row):
+        values = [rowid] + [row[c] for c in self.colnames]
+        return len(json.dumps(values, ensure_ascii=False, default=json_por_defecto).encode('utf-8'))
+
+    def snapshot_rows_size(self):
+        """Bytes de filas y separadores dentro del array JSON, sin contar los corchetes."""
+        if self._snapshot_rows_bytes is None:
+            self._snapshot_rows_bytes = sum(self._snapshot_row_size(rowid, row)
+                                            for rowid, row in self.rows.items())
+        return self._snapshot_rows_bytes + 2 * max(0, len(self.rows) - 1)
 
     def insert_raw(self, rowid, row):
+        if self._snapshot_rows_bytes is not None:
+            try:
+                self._snapshot_rows_bytes += self._snapshot_row_size(rowid, row)
+            except (TypeError, ValueError, UnicodeError):
+                self._snapshot_rows_bytes = None
         self.rows[rowid] = row
         for index in self.indexes.values():
             index.add(rowid, row)
 
     def delete_raw(self, rowid):
         row = self.rows.pop(rowid)
+        if self._snapshot_rows_bytes is not None:
+            self._snapshot_rows_bytes -= self._snapshot_row_size(rowid, row)
         for index in self.indexes.values():
             index.remove(rowid, row)
         return row
 
     def update_raw(self, rowid, row):
         old = self.rows[rowid]
+        if self._snapshot_rows_bytes is not None:
+            try:
+                self._snapshot_rows_bytes += self._snapshot_row_size(rowid, row) - self._snapshot_row_size(rowid, old)
+            except (TypeError, ValueError, UnicodeError):
+                self._snapshot_rows_bytes = None
         for index in self.indexes.values():
             index.remove(rowid, old)
             index.add(rowid, row)
@@ -245,6 +273,7 @@ class Table:
         copy.checks = list(self.checks)
         copy.foreign_keys = list(self.foreign_keys)
         copy.indexes = dict(self.indexes)
+        copy._snapshot_rows_bytes = None  # el esquema o las filas de la copia pueden cambiar
         return copy
 
     def to_sbd(self):

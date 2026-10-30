@@ -242,7 +242,9 @@ class Executor:
         if stmt.query.order_by:
             pasos.append(('ordenar', f"se ordena por {len(stmt.query.order_by)} criterio(s)"))
         if stmt.query.limit is not None or stmt.query.offset is not None:
-            pasos.append(('limite', 'se cortan las filas que sobran al final'))
+            detalle = ('se detiene la lectura al reunir las filas necesarias' if self._puede_limitar_al_leer(stmt.query, None)
+                       else 'se cortan las filas que sobran al final')
+            pasos.append(('limite', detalle))
         return Result(['paso', 'cómo'], pasos)
 
     def _explicar_origen(self, item, where, pasos, superior=False):
@@ -609,6 +611,11 @@ class Executor:
             self._clear_caches()
 
     def _run_select_body(self, stmt, outer):
+        if self._puede_limitar_al_leer(stmt, outer):
+            limit = self._limit_value(stmt.limit, outer, 'limite')
+            if limit is not None:
+                offset = self._limit_value(stmt.offset, outer, 'saltar') or 0
+                return self._leer_con_limite(stmt.cores[0], limit, offset, outer)
         if len(stmt.cores) == 1:
             names, items = self._run_core(stmt.cores[0], outer, stmt.order_by)
             if stmt.order_by:
@@ -629,6 +636,57 @@ class Executor:
         limit = self._limit_value(stmt.limit, outer, 'limite')
         if offset or limit is not None:
             rows = rows[offset:None if limit is None else offset + limit]
+        return names, rows
+
+    def _puede_limitar_al_leer(self, stmt, outer):
+        """Solo consultas simples: ordenar, agrupar y ventanas necesitan ver todas las filas."""
+        if (outer is not None or stmt.ctes or len(stmt.cores) != 1 or stmt.order_by
+                or not isinstance(stmt.limit, (Literal, Param))
+                or (stmt.offset is not None and not isinstance(stmt.offset, (Literal, Param)))):
+            return False
+        core = stmt.cores[0]
+        ref = core.from_
+        if (not isinstance(ref, TableRef) or ref.name not in self.db.tables or self._lookup_cte(ref.name) is not None
+                or core.group_by or core.having is not None or core.distinct):
+            return False
+        if any(not isinstance(item.expr, (Star, Column, Literal, Param)) for item in core.items):
+            return False
+        if core.where is not None:
+            for node in walk(core.where):
+                if not isinstance(node, (Column, Literal, Param, Binary, IsNull)):
+                    return False
+                if isinstance(node, Binary) and node.op not in ('and', 'or', '=', '!=', '<', '<=', '>', '>='):
+                    return False
+        return True
+
+    def _leer_con_limite(self, core, limit, offset, outer):
+        ref = core.from_
+        table = self.db.table(ref.name)
+        alias = ref.alias or ref.name
+        sources = [(alias, table.colnames)]
+        scope = Scope(sources)
+        self._comprobar_columnas(core, scope, outer)
+        exprs, names = self._expand_items(core.items, sources)
+        if limit == 0:
+            return names, []
+        self._ambiguas = set()
+        rowids = self._index_candidates(table, alias, core.where) if core.where is not None else None
+        source = (table.rows[rowid] for rowid in rowids) if rowids is not None else (row for _, row in table.scan_iter())
+        rows = []
+        skipped = 0
+        for n, row in enumerate(source):
+            if self._deadline is not None and not n & 2047 and time.monotonic() > self._deadline:
+                raise SBDError("la orden ha tardado demasiado y se ha cortado (límite del servidor). "
+                               "Prueba con «limite», un «donde» más preciso o un índice")
+            env = Env(scope, {alias: row}, outer)
+            if core.where is not None and truth(self.eval(core.where, env)) is not True:
+                continue
+            if skipped < offset:
+                skipped += 1
+                continue
+            rows.append(tuple(self.eval(expr, env) for expr in exprs))
+            if len(rows) >= limit:
+                break
         return names, rows
 
     def _sort_compound(self, rows, names, order_by, outer):

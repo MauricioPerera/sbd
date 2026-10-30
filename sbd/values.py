@@ -126,6 +126,12 @@ NUMEROS = (int, float, Decimal)
 CENTIMO = Decimal('0.01')
 
 
+def es_nan(value):
+    """Si un número no admite un orden fiable para una búsqueda por índice."""
+    return ((isinstance(value, float) and math.isnan(value)) or
+            (isinstance(value, Decimal) and value.is_nan()))
+
+
 def dinero(v):
     """Decimal exacto con dos decimales y redondeo comercial (0,005 sube)."""
     if isinstance(v, bool):

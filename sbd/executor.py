@@ -15,7 +15,7 @@ from .nodes import (AGGREGATES, WINDOW_ONLY, Between, Binary, Case, Cast, Column
                     FuncCall, InList, InSelect, IsNull, Join, Like, Literal, Param, Star, Subquery, SubqueryRef,
                     TableRef, Unary, Window, flatten_and, has_aggregate, is_aggregate, mentions_table, walk)
 from .result import Result
-from .values import (Intervalo, arithmetic, compare, convert, hash_key, sort_key, sumar_numeros, to_number,
+from .values import (Intervalo, arithmetic, compare, convert, es_nan, hash_key, sort_key, sumar_numeros, to_number,
                      to_text, truth)
 
 MAX_RECURSIVE_ITERATIONS = 100_000
@@ -71,6 +71,19 @@ _SIN_INDICE = object()
 _GIRADO = {'=': '=', '<': '>', '<=': '>=', '>': '<', '>=': '<='}  # 5 < x  es  x > 5
 _OP_NAMES = {'union': 'union', 'union all': 'union todo', 'intersect': 'comun', 'except': 'excepto'}
 _NO_CONSTANTE = (Column, Star, DefaultValue, Subquery, Exists, InSelect, Window)
+
+
+def _valor_para_indice(value, column):
+    """Convierte solo si la clave conserva la semántica de la comparación original."""
+    if column.type is None or (column.type in ('TEXT', 'DATE', 'TIMESTAMP') and not isinstance(value, str)):
+        return _SIN_INDICE
+    try:
+        converted = convert(value, column.type)
+        if es_nan(value) or es_nan(converted) or compare(converted, value) != 0:
+            return _SIN_INDICE
+        return converted
+    except (SBDError, TypeError, ValueError, ArithmeticError):
+        return _SIN_INDICE
 
 
 def _constante(expr):
@@ -898,13 +911,7 @@ class Executor:
             return _SIN_INDICE  # que el error salga al evaluar la condición, como sin índice
         if value is None:
             return None
-        column = table.column(col.name)
-        if column.type is None or (column.type in ('TEXT', 'DATE', 'TIMESTAMP') and not isinstance(value, str)):
-            return _SIN_INDICE  # la comparación mezclaría tipos: mejor recorrer la tabla
-        try:
-            return convert(value, column.type)
-        except SBDError:
-            return _SIN_INDICE
+        return _valor_para_indice(value, table.column(col.name))
 
     def _index_plan(self, table, alias, where):
         """(índice, rowids, 'igualdad' | 'rango') o None."""
@@ -940,13 +947,13 @@ class Executor:
                 break
         best = None
         for index in table.indexes.values():
-            if all(c in equal for c in index.columns):
+            if not index.nan_rows and all(c in equal for c in index.columns):
                 if best is None or (index.unique, len(index.columns)) > (best.unique, len(best.columns)):
                     best = index
         if best is not None:
             return best, best.find(tuple(equal[c] for c in best.columns)), 'igualdad'
         for index in table.indexes.values():
-            if len(index.columns) == 1 and index.columns[0] in ranges:
+            if not index.nan_rows and len(index.columns) == 1 and index.columns[0] in ranges:
                 low, low_inclusive, high, high_inclusive = ranges[index.columns[0]]
                 return index, index.find_range(low, low_inclusive, high, high_inclusive), 'rango'
         return None
@@ -1240,7 +1247,8 @@ class Executor:
                 continue
             if old is not None and tuple(old[c] for c in fk.columns) == values:
                 continue
-            if fk.ref_table == table.name and tuple(row[c] for c in fk.ref_columns) == values:
+            if fk.ref_table == table.name and all(row[c] is not None and compare(row[c], value) == 0
+                                                  for c, value in zip(fk.ref_columns, values)):
                 continue  # la fila se referencia a sí misma
             parent = self.db.tables.get(fk.ref_table)
             if parent is None or not self._lookup(parent, fk.ref_columns, values):
@@ -1250,15 +1258,11 @@ class Executor:
 
     def _lookup(self, table, columns, values):
         """rowids de `table` cuyas `columns` son iguales a `values`."""
-        wanted = {}
-        for c, v in zip(columns, values):
-            try:
-                wanted[c] = convert(v, table.column(c).type)
-            except SBDError:
-                return []
+        wanted = dict(zip(columns, values))
+        keys = {c: _valor_para_indice(v, table.column(c)) for c, v in wanted.items()}
         index = table.find_index(columns)
-        if index is not None:
-            return index.find(tuple(wanted[c] for c in index.columns))
+        if index is not None and not index.nan_rows and all(keys[c] is not _SIN_INDICE for c in index.columns):
+            return index.find(tuple(keys[c] for c in index.columns))
         return [rowid for rowid, r in table.rows.items()
                 if all(r[c] is not None and compare(r[c], v) == 0 for c, v in wanted.items())]
 

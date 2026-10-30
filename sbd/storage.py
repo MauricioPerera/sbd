@@ -14,7 +14,7 @@ from typing import Any, Optional
 
 from .errors import SBDError
 from .parser import KEYWORDS
-from .values import TYPE_NAMES, sort_key
+from .values import TYPE_NAMES, es_nan, sort_key
 
 _SIMPLE_IDENT = re.compile(r'[^\W\d]\w*\Z')
 _ON_DELETE_WORDS = {'cascade': 'cascada', 'set null': 'anular'}
@@ -55,6 +55,7 @@ class Index:
         self.unique = unique
         self.auto = auto  # creado por una restricción clave / unico de la tabla
         self.map = {}
+        self.nan_rows = set()  # un NaN impide usar este índice como filtro de comparación
         # Índices de una columna: además de la tabla hash, las claves ordenadas para buscar por rangos.
         self._ordenadas = [] if len(self.columns) == 1 else None   # [orden de la clave]
         self._claves = [] if len(self.columns) == 1 else None      # [clave], en el mismo orden
@@ -66,6 +67,10 @@ class Index:
         key = self.key(row)
         if any(v is None for v in key):
             return  # NULL nunca es igual a nada: no entra en el índice
+        if any(es_nan(v) for v in key):
+            self.nan_rows.add(rowid)
+            self.map.setdefault(key, set()).add(rowid)
+            return  # NaN no tiene un orden estable en las claves ordenadas
         bucket = self.map.get(key)
         if bucket is None:
             self.map[key] = {rowid}
@@ -79,6 +84,14 @@ class Index:
 
     def remove(self, rowid, row):
         key = self.key(row)
+        if rowid in self.nan_rows:
+            self.nan_rows.remove(rowid)
+            bucket = self.map.get(key)
+            if bucket is not None:
+                bucket.discard(rowid)
+                if not bucket:
+                    del self.map[key]
+            return
         bucket = self.map.get(key)
         if bucket is not None:
             bucket.discard(rowid)
